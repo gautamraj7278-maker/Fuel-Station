@@ -100,7 +100,7 @@ class ProductPriceCreate(ProductPriceBase):
 class ProductPrice(ProductPriceBase):
     id: int
     effective_date: date
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -172,7 +172,7 @@ class TankDipReading(TankDipReadingBase):
     id: int
     computed_volume_litres: Optional[float] = None
     is_auto: bool = False
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -287,8 +287,8 @@ class TankerReceipt(TankerReceiptBase):
     id: int
     status: TankerReceiptStatus
     confirmed_at: Optional[datetime] = None
-    confirmed_by_user_id: Optional[int] = None
-    created_by_user_id: Optional[int] = None
+    confirmed_by_user_id: Optional[str] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     compartments: list[TankerReceiptCompartment] = []
     lines: list[TankerReceiptLine]
@@ -322,18 +322,18 @@ class ShiftConfig(ShiftConfigBase):
 
 # User Schemas
 class UserBase(BaseModel):
-    username: str
+    username: Optional[str] = None
     email: EmailStr
     full_name: Optional[str] = None
-    role: UserRole = UserRole.OPERATOR
+    role: str = "user"
 
 class UserCreate(UserBase):
-    password: str = Field(min_length=6, max_length=72, description="Password (6-72 characters)")
+    password: Optional[str] = Field(None, min_length=6, max_length=72, description="Password (6-72 characters)")
 
     @field_validator("password")
     @classmethod
-    def password_max_72_bytes(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 72:
+    def password_max_72_bytes(cls, value: Optional[str]) -> Optional[str]:
+        if value and len(value.encode("utf-8")) > 72:
             raise ValueError(
                 "Password is too long in bytes (max 72 bytes for bcrypt). "
                 "Use a shorter password or ASCII characters."
@@ -342,17 +342,17 @@ class UserCreate(UserBase):
 
 
 class UserAdminCreate(BaseModel):
-    username: str
+    username: Optional[str] = None
     email: EmailStr
     full_name: Optional[str] = None
-    role: UserRole = UserRole.OPERATOR
+    role: str = "user"
     is_active: bool = True
-    password: str = Field(min_length=6, max_length=72, description="Password (6-72 characters)")
+    password: Optional[str] = Field(None, min_length=6, max_length=72, description="Password (6-72 characters)")
 
     @field_validator("password")
     @classmethod
-    def admin_password_max_72_bytes(cls, value: str) -> str:
-        if len(value.encode("utf-8")) > 72:
+    def admin_password_max_72_bytes(cls, value: Optional[str]) -> Optional[str]:
+        if value and len(value.encode("utf-8")) > 72:
             raise ValueError(
                 "Password is too long in bytes (max 72 bytes for bcrypt). "
                 "Use a shorter password or ASCII characters."
@@ -361,7 +361,7 @@ class UserAdminCreate(BaseModel):
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = None
-    role: Optional[UserRole] = None
+    role: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -369,7 +369,7 @@ class UserAdminUpdate(BaseModel):
     username: Optional[str] = None
     email: Optional[EmailStr] = None
     full_name: Optional[str] = None
-    role: Optional[UserRole] = None
+    role: Optional[str] = None
     is_active: Optional[bool] = None
 
 
@@ -387,9 +387,10 @@ class UserPasswordReset(BaseModel):
         return value
 
 class User(UserBase):
-    id: int
+    id: str
     is_active: bool
     created_at: datetime
+    updated_at: datetime
     
     model_config = ConfigDict(from_attributes=True)
 
@@ -440,6 +441,7 @@ class Designation(DesignationBase):
 # Employee Schemas
 class EmployeeBase(BaseModel):
     employee_name: str
+    user_id: Optional[str] = None
     dob: Optional[date] = None
     address: Optional[str] = None
     contact_no: Optional[str] = None
@@ -571,10 +573,10 @@ class SaleUpdate(BaseModel):
 class Sale(SaleBase):
     id: int
     transaction_id: str
-    user_id: int
-    operator_id: Optional[int] = None
+    user_id: str
+    operator_id: Optional[str] = None
     edited_at: Optional[datetime] = None
-    edited_by_user_id: Optional[int] = None
+    edited_by_user_id: Optional[str] = None
     edited_by_username: Optional[str] = None
     total_deposit: Optional[float] = None
     opening_meter_reading: Optional[float] = None
@@ -621,7 +623,7 @@ class SalesBatch(BaseModel):
     business_date: date
     shift: ShiftCode
     operator_employee_id: Optional[int] = None
-    user_id: int
+    user_id: str
     deposit_cash: float = 0.0
     deposit_online: float = 0.0
     deposit_credit: float = 0.0
@@ -629,11 +631,11 @@ class SalesBatch(BaseModel):
     remarks: Optional[str] = None
     credit_status: Optional[CreditStatus] = None
     credit_settled_at: Optional[datetime] = None
-    credit_settled_by_user_id: Optional[int] = None
+    credit_settled_by_user_id: Optional[str] = None
     credit_notes: Optional[str] = None
     created_at: datetime
     edited_at: Optional[datetime] = None
-    edited_by_user_id: Optional[int] = None
+    edited_by_user_id: Optional[str] = None
     lines: List[Sale] = []
 
     model_config = ConfigDict(from_attributes=True)
@@ -646,18 +648,18 @@ class SalesCreditEntry(BaseModel):
     business_date: date
     shift: ShiftCode
     operator_employee_id: Optional[int] = None
-    user_id: int
+    user_id: str
     deposit_cash: float = 0.0
     deposit_online: float = 0.0
     deposit_credit: float = 0.0
     remarks: Optional[str] = None
     credit_status: Optional[CreditStatus] = None
     credit_settled_at: Optional[datetime] = None
-    credit_settled_by_user_id: Optional[int] = None
+    credit_settled_by_user_id: Optional[str] = None
     credit_notes: Optional[str] = None
     created_at: datetime
     edited_at: Optional[datetime] = None
-    edited_by_user_id: Optional[int] = None
+    edited_by_user_id: Optional[str] = None
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -675,8 +677,8 @@ class DeletedSaleBase(BaseModel):
     sales_batch_id: Optional[int] = None
     nozzle_id: Optional[int] = None
     meter_id: Optional[int] = None
-    user_id: int
-    operator_id: Optional[int] = None
+    user_id: str
+    operator_id: Optional[str] = None
     operator_employee_id: Optional[int] = None
     customer_id: Optional[int] = None
     fuel_type: FuelType
@@ -696,13 +698,13 @@ class DeletedSaleBase(BaseModel):
     shift: ShiftCode
     created_at: Optional[datetime] = None
     edited_at: Optional[datetime] = None
-    edited_by_user_id: Optional[int] = None
+    edited_by_user_id: Optional[str] = None
 
 
 class DeletedSale(DeletedSaleBase):
     id: int
     deleted_at: datetime
-    deleted_by_user_id: Optional[int] = None
+    deleted_by_user_id: Optional[str] = None
     delete_reason: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -719,8 +721,8 @@ class DeletedTankerReceiptBase(BaseModel):
 
     status: TankerReceiptStatus
     confirmed_at: Optional[datetime] = None
-    confirmed_by_user_id: Optional[int] = None
-    created_by_user_id: Optional[int] = None
+    confirmed_by_user_id: Optional[str] = None
+    created_by_user_id: Optional[str] = None
     created_at: Optional[datetime] = None
 
     compartments_json: Optional[str] = None
@@ -730,7 +732,7 @@ class DeletedTankerReceiptBase(BaseModel):
 class DeletedTankerReceipt(DeletedTankerReceiptBase):
     id: int
     deleted_at: datetime
-    deleted_by_user_id: Optional[int] = None
+    deleted_by_user_id: Optional[str] = None
     delete_reason: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
@@ -744,10 +746,10 @@ class DeletionRequest(BaseModel):
     target_id: int
     status: DeletionRequestStatus
     reason: Optional[str] = None
-    requested_by_user_id: int
+    requested_by_user_id: str
     requested_by_username: Optional[str] = None
     requested_at: datetime
-    reviewed_by_user_id: Optional[int] = None
+    reviewed_by_user_id: Optional[str] = None
     reviewed_by_username: Optional[str] = None
     reviewed_at: Optional[datetime] = None
     review_comment: Optional[str] = None
@@ -770,7 +772,7 @@ class NozzleBase(BaseModel):
 class AuditLog(BaseModel):
     id: int
     created_at: datetime
-    user_id: Optional[int] = None
+    user_id: Optional[str] = None
     username: Optional[str] = None
 
     method: str
@@ -849,7 +851,7 @@ class DispenserShiftAssignmentBase(BaseModel):
     business_date: date
     shift: ShiftCode
     dispenser_id: int
-    operator_id: int
+    operator_id: str
 
 
 class DispenserShiftAssignmentCreate(DispenserShiftAssignmentBase):
@@ -883,7 +885,7 @@ class TankTransferCreate(TankTransferBase):
 
 class TankTransfer(TankTransferBase):
     id: int
-    user_id: int
+    user_id: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -901,7 +903,7 @@ class TankComputedVolume(BaseModel):
 
 class DailyClose(DailyCloseBase):
     id: int
-    user_id: int
+    user_id: str
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -985,7 +987,7 @@ class CashAdjustmentUpdate(BaseModel):
 
 class CashAdjustment(CashAdjustmentBase):
     id: int
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -1010,7 +1012,7 @@ class OnlineAllocationUpdate(BaseModel):
 
 class OnlineAllocation(OnlineAllocationBase):
     id: int
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -1039,7 +1041,7 @@ class ExpenseUpdate(BaseModel):
 
 class Expense(ExpenseBase):
     id: int
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 
@@ -1064,7 +1066,7 @@ class CashDepositUpdate(BaseModel):
 
 class CashDeposit(CashDepositBase):
     id: int
-    created_by_user_id: Optional[int] = None
+    created_by_user_id: Optional[str] = None
     created_at: datetime
     model_config = ConfigDict(from_attributes=True)
 

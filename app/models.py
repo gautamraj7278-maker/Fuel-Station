@@ -80,7 +80,7 @@ class Product(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     prices = relationship(
         "ProductPrice",
@@ -98,7 +98,7 @@ class ProductPrice(Base):
     price_per_liter = Column(Float, nullable=False)
     effective_date = Column(Date, nullable=False, index=True)
     remarks = Column(String)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     product = relationship("Product", back_populates="prices")
@@ -120,7 +120,7 @@ class Tank(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     product = relationship("Product")
     calibration_points = relationship(
@@ -157,18 +157,22 @@ class ShiftConfig(Base):
 class User(Base):
     __tablename__ = "users"
     
-    id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=False)
+    # Supabase UUID (PRIMARY LINK)
+    id = Column(String, primary_key=True, index=True)
+    username = Column(String, unique=True, index=True, nullable=True) # Optional with Supabase
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=False)
-    full_name = Column(String)
-    role = Column(Enum(UserRole), default=UserRole.OPERATOR)
+    hashed_password = Column(String, nullable=True) # Not used with Supabase
+    full_name = Column(String, nullable=True)
+    role = Column(String, default="user") # admin / cashier / manager
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+    updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
     
     # Relationships
     sales = relationship("Sale", back_populates="user", foreign_keys="Sale.user_id")
     operated_sales = relationship("Sale", back_populates="operator", foreign_keys="Sale.operator_id")
+    employee = relationship("Employee", back_populates="user", uselist=False)
+
 
 class Customer(Base):
     __tablename__ = "customers"
@@ -181,7 +185,7 @@ class Customer(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     
     # Relationships
     sales = relationship("Sale", back_populates="customer")
@@ -197,7 +201,7 @@ class Designation(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     employees = relationship("Employee", back_populates="designation")
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
@@ -207,6 +211,10 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, index=True)
+    
+    # Link to Supabase user
+    user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
+    
     employee_name = Column(String, nullable=False, index=True)
     dob = Column(Date, nullable=True)
     address = Column(Text, nullable=True)
@@ -217,9 +225,10 @@ class Employee(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     designation = relationship("Designation", back_populates="employees")
+    user = relationship("User", back_populates="employee", foreign_keys=[user_id])
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
 
 class Dispenser(Base):
@@ -227,13 +236,13 @@ class Dispenser(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     dispenser_number = Column(String, unique=True, nullable=False, index=True)
-    fuel_type = Column(String, nullable=True)
+    fuel_type = Column(Enum(FuelType), nullable=True)
     is_active = Column(Boolean, default=True)
     last_maintenance = Column(DateTime)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     # Relationships
     sales = relationship("Sale", back_populates="dispenser")
@@ -248,14 +257,14 @@ class Nozzle(Base):
     dispenser_id = Column(Integer, ForeignKey("dispensers.id"), nullable=False, index=True)
     nozzle_number = Column(String, nullable=False, index=True)
     # Keep fuel_type for compatibility, but prefer product_id.
-    fuel_type = Column(String, nullable=False, index=True)
+    fuel_type = Column(Enum(FuelType), nullable=False, index=True)
     product_id = Column(Integer, ForeignKey("products.id"), nullable=True, index=True)
     tank_id = Column(Integer, ForeignKey("tanks.id"), nullable=True, index=True)
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     dispenser = relationship("Dispenser", back_populates="nozzles")
     product = relationship("Product")
@@ -276,7 +285,7 @@ class Meter(Base):
     created_at = Column(DateTime, default=datetime.utcnow)
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     nozzle = relationship("Nozzle", back_populates="meters")
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
@@ -285,7 +294,7 @@ class FuelInventory(Base):
     __tablename__ = "fuel_inventory"
     
     id = Column(Integer, primary_key=True, index=True)
-    fuel_type = Column(String, unique=True, nullable=False, index=True)
+    fuel_type = Column(Enum(FuelType), unique=True, nullable=False, index=True)
     current_stock = Column(Float, default=0.0)  # in liters
     price_per_liter = Column(Float, nullable=False)
     reorder_level = Column(Float, default=0.0)  # minimum stock level
@@ -300,7 +309,7 @@ class SalesBatch(Base):
     business_date = Column(Date, nullable=False, index=True)
     shift = Column(Enum(ShiftCode), default=ShiftCode.A)
     operator_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
 
     deposit_cash = Column(Float, nullable=False, default=0.0)
     deposit_online = Column(Float, nullable=False, default=0.0)
@@ -309,12 +318,12 @@ class SalesBatch(Base):
     remarks = Column(String, nullable=True)
     credit_status = Column(Enum(CreditStatus), nullable=True, index=True)
     credit_settled_at = Column(DateTime, nullable=True, index=True)
-    credit_settled_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    credit_settled_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     credit_notes = Column(String, nullable=True)
 
     created_at = Column(DateTime, default=datetime.utcnow)
     edited_at = Column(DateTime, nullable=True, index=True)
-    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    edited_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     dispenser = relationship("Dispenser")
     operator_employee = relationship("Employee")
@@ -332,8 +341,8 @@ class Sale(Base):
     sales_batch_id = Column(Integer, ForeignKey("sales_batches.id"), nullable=True, index=True)
     nozzle_id = Column(Integer, ForeignKey("nozzles.id"), nullable=True)
     meter_id = Column(Integer, ForeignKey("meters.id"), nullable=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
+    operator_id = Column(String, ForeignKey("users.id"), nullable=True)
     # Operator is a station employee (preferred for shift-closing workflow)
     operator_employee_id = Column(Integer, ForeignKey("employees.id"), nullable=True, index=True)
     customer_id = Column(Integer, ForeignKey("customers.id"), nullable=True)
@@ -356,7 +365,7 @@ class Sale(Base):
     transaction_type = Column(Enum(TransactionType), default=TransactionType.SALE)
     shift = Column(Enum(ShiftCode), default=ShiftCode.A)
     edited_at = Column(DateTime, nullable=True, index=True)
-    edited_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    edited_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     
     # Relationships
@@ -390,11 +399,11 @@ class DeletedSale(Base):
     sales_batch_id = Column(Integer, nullable=True)
     nozzle_id = Column(Integer, nullable=True)
     meter_id = Column(Integer, nullable=True)
-    user_id = Column(Integer, nullable=False)
-    operator_id = Column(Integer, nullable=True)
+    user_id = Column(String, nullable=False)
+    operator_id = Column(String, nullable=True)
     operator_employee_id = Column(Integer, nullable=True, index=True)
     customer_id = Column(Integer, nullable=True)
-    fuel_type = Column(String, nullable=False, index=True)
+    fuel_type = Column(Enum(FuelType), nullable=False, index=True)
     product_id = Column(Integer, nullable=True)
 
     quantity = Column(Float, nullable=False)
@@ -414,10 +423,10 @@ class DeletedSale(Base):
 
     created_at = Column(DateTime, nullable=True)
     edited_at = Column(DateTime, nullable=True)
-    edited_by_user_id = Column(Integer, nullable=True)
+    edited_by_user_id = Column(String, nullable=True)
 
     deleted_at = Column(DateTime, default=datetime.utcnow, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     delete_reason = Column(String, nullable=True)
 
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
@@ -440,9 +449,9 @@ class DeletedTankerReceipt(Base):
 
     status = Column(Enum(TankerReceiptStatus), default=TankerReceiptStatus.DRAFT, index=True)
     confirmed_at = Column(DateTime, nullable=True)
-    confirmed_by_user_id = Column(Integer, nullable=True)
+    confirmed_by_user_id = Column(String, nullable=True)
 
-    created_by_user_id = Column(Integer, nullable=True)
+    created_by_user_id = Column(String, nullable=True)
     created_at = Column(DateTime, nullable=True)
 
     # Snapshots (JSON strings) for compartments and lines.
@@ -450,7 +459,7 @@ class DeletedTankerReceipt(Base):
     lines_json = Column(Text, nullable=True)
 
     deleted_at = Column(DateTime, default=datetime.utcnow, index=True)
-    deleted_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     delete_reason = Column(String, nullable=True)
 
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
@@ -464,9 +473,9 @@ class DeletionRequest(Base):
     target_id = Column(Integer, nullable=False, index=True)
     status = Column(Enum(DeletionRequestStatus), default=DeletionRequestStatus.PENDING, nullable=False, index=True)
     reason = Column(String, nullable=True)
-    requested_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    requested_by_user_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     requested_at = Column(DateTime, default=datetime.utcnow, index=True)
-    reviewed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    reviewed_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     reviewed_at = Column(DateTime, nullable=True)
     review_comment = Column(String, nullable=True)
 
@@ -481,7 +490,7 @@ class DispenserShiftAssignment(Base):
     business_date = Column(Date, nullable=False, index=True)
     shift = Column(Enum(ShiftCode), nullable=False, index=True)
     dispenser_id = Column(Integer, ForeignKey("dispensers.id"), nullable=False, index=True)
-    operator_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    operator_id = Column(String, ForeignKey("users.id"), nullable=False, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     dispenser = relationship("Dispenser")
@@ -497,7 +506,7 @@ class TankTransfer(Base):
     product_id = Column(Integer, ForeignKey("products.id"), nullable=False, index=True)
     volume = Column(Float, nullable=False)
     transfer_type = Column(Enum(TankTransferType), default=TankTransferType.MANUAL)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     from_tank = relationship("Tank", foreign_keys=[from_tank_id])
@@ -524,7 +533,7 @@ class TankDipReading(Base):
     manual_volume_litres = Column(Float, nullable=True)
     is_auto = Column(Boolean, default=False)
 
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     tank = relationship("Tank")
@@ -545,7 +554,7 @@ class TankStockLog(Base):
     notes = Column(String, nullable=True)
 
     related_receipt_id = Column(Integer, ForeignKey("tanker_receipts.id"), nullable=True, index=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     tank = relationship("Tank")
@@ -575,9 +584,9 @@ class TankerReceipt(Base):
 
     status = Column(Enum(TankerReceiptStatus), default=TankerReceiptStatus.DRAFT, index=True)
     confirmed_at = Column(DateTime, nullable=True)
-    confirmed_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    confirmed_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
     product = relationship("Product")
@@ -646,7 +655,7 @@ class DailyClose(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     business_date = Column(Date, nullable=False, index=True)
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    user_id = Column(String, ForeignKey("users.id"), nullable=False)
     opening_cash = Column(Float, default=0.0)
     closing_cash = Column(Float, default=0.0)
     notes = Column(String)
@@ -658,7 +667,7 @@ class InventoryLog(Base):
     __tablename__ = "inventory_logs"
     
     id = Column(Integer, primary_key=True, index=True)
-    fuel_type = Column(String, nullable=False, index=True)
+    fuel_type = Column(Enum(FuelType), nullable=False, index=True)
     action = Column(String, nullable=False)  # restock, sale, adjustment
     quantity = Column(Float, nullable=False)
     previous_stock = Column(Float, nullable=False)
@@ -695,7 +704,7 @@ class CashAdjustment(Base):
     business_date = Column(Date, nullable=False, index=True)
     amount = Column(Float, nullable=False)
     remarks = Column(String, nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     created_by = relationship("User")
@@ -709,7 +718,7 @@ class OnlineAllocation(Base):
     account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     remarks = Column(String, nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     account = relationship("BankAccount")
@@ -726,7 +735,7 @@ class Expense(Base):
     account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=True, index=True)
     amount = Column(Float, nullable=False)
     remarks = Column(String, nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     category = relationship("ExpenseCategory")
@@ -742,7 +751,7 @@ class CashDeposit(Base):
     account_id = Column(Integer, ForeignKey("bank_accounts.id"), nullable=False, index=True)
     amount = Column(Float, nullable=False)
     remarks = Column(String, nullable=True)
-    created_by_user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    created_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     account = relationship("BankAccount")
@@ -755,7 +764,7 @@ class AuditLog(Base):
     id = Column(Integer, primary_key=True, index=True)
     created_at = Column(DateTime, default=datetime.utcnow, index=True)
 
-    user_id = Column(Integer, ForeignKey("users.id"), nullable=True, index=True)
+    user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
     username = Column(String, nullable=True, index=True)
 
     method = Column(String, nullable=False, index=True)

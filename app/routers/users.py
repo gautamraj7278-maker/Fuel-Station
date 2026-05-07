@@ -75,7 +75,7 @@ def create_user(
 
 @router.put("/{user_id}", response_model=schemas.User)
 def update_user(
-    user_id: int,
+    user_id: str,
     payload: schemas.UserAdminUpdate,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
@@ -99,7 +99,8 @@ def update_user(
         user.full_name = update_data["full_name"]
     if "role" in update_data:
         _ensure_admin_guard(db, target_user=user, acting_user=current_user)
-        user.role = _coerce_role(update_data["role"])
+        # With Supabase, role might be a simple string
+        user.role = update_data["role"]
     if "is_active" in update_data:
         if bool(update_data["is_active"]) is False:
             _ensure_admin_guard(db, target_user=user, acting_user=current_user)
@@ -112,7 +113,7 @@ def update_user(
 
 @router.put("/{user_id}/password", status_code=status.HTTP_204_NO_CONTENT)
 def reset_password(
-    user_id: int,
+    user_id: str,
     payload: schemas.UserPasswordReset,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
@@ -121,6 +122,7 @@ def reset_password(
     user = db.query(models.User).filter(models.User.id == user_id).first()
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
+    # Note: Password reset should ideally be handled via Supabase
     user.hashed_password = get_password_hash(payload.password)
     db.commit()
     return None
@@ -128,7 +130,7 @@ def reset_password(
 
 @router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 def deactivate_user(
-    user_id: int,
+    user_id: str,
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):

@@ -4,6 +4,7 @@ import traceback
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
+from app.routers.auth import router as auth_router
 
 from app import models
 print("Loading SQLAlchemy models...")
@@ -80,6 +81,7 @@ app.include_router(daily_close.router, prefix="/api/daily-close", tags=["Daily C
 app.include_router(financial.router, prefix="/api/financial", tags=["Financial Management"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(supabase_test.router, prefix="/api", tags=["Supabase Test"])
+app.include_router(auth_router)
 
 # ---------------- ROOT ENDPOINTS ----------------
 @app.get("/")

@@ -391,10 +391,10 @@ def get_inventory_status(
     return [
         {
             "fuel_type": item.fuel_type,
-            "current_stock": float(tank_totals.get(item.fuel_type, item.current_stock or 0.0)),
+            "current_stock": float(tank_totals.get(item.fuel_type, 0.0)), # Always use tank totals as source of truth
             "reorder_level": float(item.reorder_level or 0),
             "price_per_liter": float(item.price_per_liter or 0),
-            "needs_reorder": float(tank_totals.get(item.fuel_type, item.current_stock or 0.0)) <= float(item.reorder_level or 0),
+            "needs_reorder": float(tank_totals.get(item.fuel_type, 0.0)) <= float(item.reorder_level or 0),
             "last_updated": item.last_updated.isoformat() if item.last_updated else None,
         }
         for item in inventory

@@ -231,6 +231,8 @@ def get_inventory_daily_status(
 
         receipts = 0.0
         if product_ids:
+            # We look for receipts confirmed on this business_date, 
+            # as that's when the stock actually entered the tanks.
             receipts = float(
                 (
                     db.query(func.sum(models.TankerReceiptLine.received_volume_litres))
@@ -238,7 +240,8 @@ def get_inventory_daily_status(
                     .join(models.Tank, models.Tank.id == models.TankerReceiptLine.tank_id)
                     .filter(
                         models.TankerReceipt.status == models.TankerReceiptStatus.CONFIRMED,
-                        models.TankerReceipt.receipt_date == business_date,
+                        # Use confirmed_at date to match when stock actually moved
+                        func.date(models.TankerReceipt.confirmed_at) == business_date,
                         models.Tank.is_buffer == False,  # noqa: E712
                         models.TankerReceiptLine.product_id.in_(product_ids),
                     )
@@ -327,6 +330,56 @@ def get_inventory_daily_status(
         db.commit()  # persist any auto-openings created during status computation
 
     return results
+
+@router.post("/sync-with-tanks")
+def sync_inventory_with_tanks(
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_ops_access),
+):
+    """
+    Force sync FuelInventory.current_stock with the sum of all Tank.current_volume.
+    Useful for fixing discrepancies.
+    """
+    _ensure_inventory_rows_for_configured_products(db)
+    
+    inventory_rows = db.query(models.FuelInventory).all()
+    synced_count = 0
+    
+    for inv in inventory_rows:
+        # Sum up all main tanks for this fuel type
+        tank_total = float(
+            (
+                db.query(func.sum(models.Tank.current_volume))
+                .join(models.Product, models.Product.id == models.Tank.product_id)
+                .filter(
+                    models.Product.fuel_type == inv.fuel_type,
+                    models.Tank.is_buffer == False  # noqa: E712
+                )
+                .scalar()
+            )
+            or 0.0
+        )
+        
+        if abs(float(inv.current_stock or 0.0) - tank_total) > 0.01:
+            previous_stock = float(inv.current_stock or 0.0)
+            inv.current_stock = tank_total
+            
+            # Log the sync action
+            db.add(
+                models.InventoryLog(
+                    fuel_type=inv.fuel_type,
+                    action="sync_with_tanks",
+                    quantity=tank_total - previous_stock,
+                    previous_stock=previous_stock,
+                    new_stock=tank_total,
+                    notes=f"System sync: Adjusted to match tank volumes (Previous: {previous_stock}, New: {tank_total})",
+                )
+            )
+            synced_count += 1
+            
+    db.commit()
+    return {"status": "success", "synced_categories": synced_count}
+
 
 @router.get("/{fuel_type}", response_model=schemas.FuelInventory)
 def get_inventory_by_type(

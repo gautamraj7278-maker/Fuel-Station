@@ -29,6 +29,50 @@ def _get_category_names(db: Session) -> set[str]:
     return {str(r[0]).strip().lower() for r in rows if r and str(r[0]).strip()}
 
 
+# --- LOOKUP HELPERS (Name to ID) ---
+
+def _get_employee_map(db: Session) -> Dict[str, int]:
+    """Returns a map of employee_name (lowercase) to employee_id."""
+    rows = db.query(models.Employee.id, models.Employee.employee_name).filter(models.Employee.is_deleted == False).all()
+    return {str(name).strip().lower(): id for id, name in rows if name}
+
+
+def _get_dispenser_map(db: Session) -> Dict[str, int]:
+    """Returns a map of dispenser_number (lowercase) to dispenser_id."""
+    rows = db.query(models.Dispenser.id, models.Dispenser.dispenser_number).filter(models.Dispenser.is_deleted == False).all()
+    return {str(num).strip().lower(): id for id, num in rows if num}
+
+
+def _get_nozzle_map(db: Session) -> Dict[Tuple[int, str], int]:
+    """Returns a map of (dispenser_id, nozzle_number_lowercase) to nozzle_id."""
+    rows = db.query(models.Nozzle.id, models.Nozzle.dispenser_id, models.Nozzle.nozzle_number).filter(models.Nozzle.is_deleted == False).all()
+    return {(d_id, str(num).strip().lower()): id for id, d_id, num in rows if num}
+
+
+def _get_meter_map(db: Session) -> Dict[int, int]:
+    """Returns a map of nozzle_id to meter_id."""
+    rows = db.query(models.Meter.id, models.Meter.nozzle_id).filter(models.Meter.is_active == True).all()
+    return {n_id: id for id, n_id in rows}
+
+
+def _get_product_map(db: Session) -> Dict[str, int]:
+    """Returns a map of product_name (lowercase) to product_id."""
+    rows = db.query(models.Product.id, models.Product.product_name).filter(models.Product.is_deleted == False).all()
+    return {str(name).strip().lower(): id for id, name in rows if name}
+
+
+def _get_tank_map(db: Session) -> Dict[str, int]:
+    """Returns a map of tank_name (lowercase) to tank_id."""
+    rows = db.query(models.Tank.id, models.Tank.tank_name).filter(models.Tank.is_deleted == False).all()
+    return {str(name).strip().lower(): id for id, name in rows if name}
+
+
+def _get_designation_map(db: Session) -> Dict[str, int]:
+    """Returns a map of designation name (lowercase) to id."""
+    rows = db.query(models.Designation.id, models.Designation.name).filter(models.Designation.is_active == True).all()
+    return {str(name).strip().lower(): id for id, name in rows if name}
+
+
 def _normalize_header(value: Any) -> str:
     if value is None:
         return ""
@@ -201,16 +245,15 @@ def _generate_transaction_id() -> str:
 
 
 SALES_TEMPLATE_COLUMNS = [
-    "business_date",  # optional (YYYY-MM-DD). Leave blank to auto-calc.
-    "shift",  # optional (A/B/C). Leave blank to auto-calc.
+    "business_date",  # optional (YYYY-MM-DD)
+    "shift",  # optional (A/B/C)
     "transaction_type",  # sale/testing
-    "operator_employee_id",  # required
-    "dispenser_id",  # required
-    "nozzle_id",  # required if no meter_id
-    "meter_id",  # required if using meters
-    "closing_meter_reading",  # required if meter_id
-    "quantity",  # required if no meter_id (liters)
-    "testing_quantity",  # optional (liters)
+    "employee_name",  # user-friendly instead of operator_employee_id
+    "dispenser_number",  # user-friendly instead of dispenser_id
+    "nozzle_number",  # user-friendly instead of nozzle_id
+    "closing_meter_reading",  # required if using meters
+    "quantity",  # required if no meter readings
+    "testing_quantity",  # optional
     "deposit_cash",  # optional
     "deposit_online",  # optional
     "remarks",  # optional
@@ -876,52 +919,69 @@ def commit_tanker_receipts_upload(
     return {"inserted": inserted, "updated": updated}
 
 
-def _validate_and_normalize_sale_row(row: Dict[str, Any], *, row_number: int) -> Tuple[Optional[Dict[str, Any]], List[str]]:
+def _validate_and_normalize_sale_row(
+    row: Dict[str, Any], 
+    *, 
+    row_number: int,
+    employee_map: Dict[str, int],
+    dispenser_map: Dict[str, int],
+    nozzle_map: Dict[Tuple[int, str], int],
+    meter_map: Dict[int, int]
+) -> Tuple[Optional[Dict[str, Any]], List[str]]:
     errors: List[str] = []
+    
+    # 1. Date & Shift
     business_date = _to_date(row.get("business_date"))
-
     shift_raw = str(row.get("shift") or "").strip().upper() or None
     if shift_raw and shift_raw not in ("A", "B", "C"):
         errors.append("shift must be A, B, or C")
 
+    # 2. Transaction Type
     tx_raw = str(row.get("transaction_type") or "sale").strip().lower()
     if tx_raw not in ("sale", "testing"):
         errors.append("transaction_type must be 'sale' or 'testing'")
 
-    operator_employee_id = _to_int(row.get("operator_employee_id"))
-    if operator_employee_id is None:
-        errors.append("operator_employee_id is required")
+    # 3. Lookups
+    emp_name = str(row.get("employee_name") or "").strip().lower()
+    operator_employee_id = employee_map.get(emp_name)
+    if not operator_employee_id:
+        errors.append(f"Employee '{row.get('employee_name')}' not found or inactive")
 
-    dispenser_id = _to_int(row.get("dispenser_id"))
-    if dispenser_id is None:
-        errors.append("dispenser_id is required")
+    disp_num = str(row.get("dispenser_number") or "").strip().lower()
+    dispenser_id = dispenser_map.get(disp_num)
+    if not dispenser_id:
+        errors.append(f"Dispenser '{row.get('dispenser_number')}' not found or inactive")
 
-    nozzle_id = _to_int(row.get("nozzle_id"))
-    meter_id = _to_int(row.get("meter_id"))
-    if meter_id is None and nozzle_id is None:
-        errors.append("Either meter_id or nozzle_id is required")
+    nozzle_num = str(row.get("nozzle_number") or "").strip().lower()
+    nozzle_id = None
+    meter_id = None
+    if dispenser_id and nozzle_num:
+        nozzle_id = nozzle_map.get((dispenser_id, nozzle_num))
+        if not nozzle_id:
+            errors.append(f"Nozzle '{row.get('nozzle_number')}' not found for dispenser '{row.get('dispenser_number')}'")
+        else:
+            meter_id = meter_map.get(nozzle_id)
 
+    # 4. Quantities & Readings
     closing_meter_reading = _to_float(row.get("closing_meter_reading"))
     quantity = _to_float(row.get("quantity"))
     testing_quantity = _to_float(row.get("testing_quantity"))
 
-    if meter_id is not None and closing_meter_reading is None:
-        errors.append("closing_meter_reading is required when meter_id is provided")
-    if meter_id is None and (quantity is None or quantity <= 0):
-        errors.append("quantity is required and must be > 0 when meter_id is not provided")
+    if meter_id is not None:
+        if closing_meter_reading is None:
+            errors.append("closing_meter_reading is required for meter-linked nozzles")
+    else:
+        if quantity is None or quantity <= 0:
+            errors.append("quantity is required and must be > 0 for non-meter entries")
+
     if testing_quantity is not None and testing_quantity < 0:
         errors.append("testing_quantity must be >= 0")
 
-    deposit_cash = _to_float(row.get("deposit_cash"))
-    deposit_online = _to_float(row.get("deposit_online"))
-    if deposit_cash is not None and deposit_cash < 0:
-        errors.append("deposit_cash must be >= 0")
-    if deposit_online is not None and deposit_online < 0:
-        errors.append("deposit_online must be >= 0")
-
-    remarks = row.get("remarks")
-    if remarks is not None:
-        remarks = str(remarks).strip() or None
+    # 5. Deposits
+    deposit_cash = _to_float(row.get("deposit_cash")) or 0.0
+    deposit_online = _to_float(row.get("deposit_online")) or 0.0
+    if deposit_cash < 0: errors.append("deposit_cash must be >= 0")
+    if deposit_online < 0: errors.append("deposit_online must be >= 0")
 
     if errors:
         return None, errors
@@ -937,13 +997,293 @@ def _validate_and_normalize_sale_row(row: Dict[str, Any], *, row_number: int) ->
         "closing_meter_reading": closing_meter_reading,
         "quantity": float(quantity) if quantity is not None else None,
         "testing_quantity": float(testing_quantity) if testing_quantity is not None else None,
-        "deposit_cash": float(deposit_cash or 0.0),
-        "deposit_online": float(deposit_online or 0.0),
-        "remarks": remarks,
+        "deposit_cash": float(deposit_cash),
+        "deposit_online": float(deposit_online),
+        "remarks": str(row.get("remarks") or "").strip() or None,
         "_row": row_number,
+        "employee_name": row.get("employee_name"),
+        "dispenser_number": row.get("dispenser_number"),
+        "nozzle_number": row.get("nozzle_number"),
     }
 
     return normalized, []
+
+
+@router.post("/sales/preview")
+async def preview_sales_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    _ = current_user
+    content = await file.read()
+    filename = (file.filename or "").lower()
+
+    if filename.endswith(".csv"):
+        _, rows = _read_csv_bytes(content)
+    elif filename.endswith(".xlsx"):
+        _, rows = _read_xlsx_bytes(content)
+    else:
+        raise HTTPException(status_code=400, detail="Unsupported file type. Use .csv or .xlsx")
+
+    if not rows:
+        raise HTTPException(status_code=400, detail="No data found in file")
+
+    # Load maps for validation
+    employee_map = _get_employee_map(db)
+    dispenser_map = _get_dispenser_map(db)
+    nozzle_map = _get_nozzle_map(db)
+    meter_map = _get_meter_map(db)
+
+    valid_rows = []
+    errors = []
+
+    for idx, row in enumerate(rows, start=2):
+        normalized, row_errors = _validate_and_normalize_sale_row(
+            row, 
+            row_number=idx,
+            employee_map=employee_map,
+            dispenser_map=dispenser_map,
+            nozzle_map=nozzle_map,
+            meter_map=meter_map
+        )
+        if row_errors:
+            errors.append({"row": idx, "errors": row_errors})
+        else:
+            # Add preview calculations (pricing, etc.)
+            try:
+                # Use the existing sale preview logic
+                preview_data = sales_router.compute_sale_preview(
+                    schemas.SaleCreate(**normalized),
+                    db=db,
+                    current_user=current_user
+                )
+                normalized.update(preview_data)
+                valid_rows.append(normalized)
+            except HTTPException as exc:
+                errors.append({"row": idx, "errors": [exc.detail]})
+            except Exception as e:
+                errors.append({"row": idx, "errors": [str(e)]})
+
+    return {
+        "total_rows": len(rows),
+        "valid_rows": len(valid_rows),
+        "error_count": len(errors),
+        "errors": errors,
+        "preview": valid_rows
+    }
+
+
+@router.post("/sales/commit")
+def commit_sales_upload(
+    payload: Dict[str, Any],
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    """
+    Commit the bulk sales data. 
+    Groups sales by dispenser/date/shift and creates proper SalesBatches.
+    """
+    rows = payload.get("rows") or []
+    if not rows:
+        raise HTTPException(status_code=400, detail="No rows to commit")
+
+    try:
+        # Group rows by (dispenser_id, business_date, shift, operator_employee_id)
+        # to create meaningful batches.
+        batches: Dict[Tuple, List[Dict]] = {}
+        for r in rows:
+            key = (
+                r["dispenser_id"],
+                r["business_date"],
+                r["shift"],
+                r["operator_employee_id"]
+            )
+            if key not in batches:
+                batches[key] = []
+            batches[key].append(r)
+
+        committed_sales = 0
+        for key, lines in batches.items():
+            dispenser_id, b_date, shift, operator_id = key
+            
+            # Create a SalesBatch payload
+            batch_create = schemas.SalesBatchCreate(
+                dispenser_id=dispenser_id,
+                business_date=b_date,
+                shift=shift,
+                operator_employee_id=operator_id,
+                deposit_cash=sum(float(l["deposit_cash"] or 0) for l in lines),
+                deposit_online=sum(float(l["deposit_online"] or 0) for l in lines),
+                remarks=f"Bulk Upload: {len(lines)} lines",
+                lines=[
+                    schemas.SalesBatchLineCreate(
+                        nozzle_id=l["nozzle_id"],
+                        meter_id=l["meter_id"],
+                        closing_meter_reading=l["closing_meter_reading"],
+                        quantity=l["quantity"],
+                        testing_quantity=l["testing_quantity"]
+                    )
+                    for l in lines
+                ]
+            )
+            
+            # Use the official sales router logic to commit
+            # This ensures stock deduction, pricing, and logging are ALL handled correctly.
+            sales_router.create_sales_batch(batch_create, db=db, current_user=current_user)
+            committed_sales += len(lines)
+
+        db.commit()
+        return {
+            "status": "success", 
+            "message": f"Successfully committed {committed_sales} sales in {len(batches)} batches."
+        }
+
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=f"Commit failed: {str(e)}")
+
+
+# --- EMPLOYEE BULK UPLOAD ---
+
+EMPLOYEE_TEMPLATE_COLUMNS = [
+    "employee_name",  # required
+    "designation_name",  # user-friendly lookup
+    "contact_no",  # optional
+    "id_no",  # optional (NIC/Passport)
+    "dob",  # optional (YYYY-MM-DD)
+    "address",  # optional
+]
+
+@router.get("/employees/template")
+def download_employee_template():
+    return {
+        "columns": EMPLOYEE_TEMPLATE_COLUMNS,
+        "sample": {
+            "employee_name": "John Doe",
+            "designation_name": "Cashier",
+            "contact_no": "0771234567",
+            "id_no": "199012345678",
+            "dob": "1990-01-01",
+            "address": "123 Main St, Colombo"
+        }
+    }
+
+@router.post("/employees/preview")
+async def preview_employees_upload(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: models.User = Depends(require_admin),
+):
+    _ = current_user
+    content = await file.read()
+    _, rows = _read_xlsx_bytes(content) if file.filename.endswith(".xlsx") else _read_csv_bytes(content)
+    
+    designation_map = _get_designation_map(db)
+    valid_rows = []
+    errors = []
+
+    for idx, row in enumerate(rows, start=2):
+        row_errors = []
+        name = str(row.get("employee_name") or "").strip()
+        if not name: row_errors.append("employee_name is required")
+        
+        desig_name = str(row.get("designation_name") or "").strip().lower()
+        designation_id = designation_map.get(desig_name)
+        if not designation_id and desig_name:
+            row_errors.append(f"Designation '{row.get('designation_name')}' not found")
+
+        # Check for duplicates in DB
+        id_no = str(row.get("id_no") or "").strip() or None
+        if id_no:
+            existing = db.query(models.Employee).filter(models.Employee.id_no == id_no).first()
+            if existing: row_errors.append(f"Employee with ID No '{id_no}' already exists")
+
+        if row_errors:
+            errors.append({"row": idx, "errors": row_errors})
+        else:
+            valid_rows.append({
+                "employee_name": name,
+                "designation_id": designation_id,
+                "contact_no": str(row.get("contact_no") or "").strip() or None,
+                "id_no": id_no,
+                "dob": _to_date(row.get("dob")).isoformat() if _to_date(row.get("dob")) else None,
+                "address": str(row.get("address") or "").strip() or None,
+                "_row": idx
+            })
+
+    return {"total_rows": len(rows), "valid_rows": len(valid_rows), "error_count": len(errors), "errors": errors, "preview": valid_rows}
+
+@router.post("/employees/commit")
+def commit_employees_upload(payload: Dict[str, Any], db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    rows = payload.get("rows") or []
+    try:
+        for r in rows:
+            emp = models.Employee(
+                employee_name=r["employee_name"],
+                designation_id=r["designation_id"],
+                contact_no=r["contact_no"],
+                id_no=r["id_no"],
+                dob=r["dob"],
+                address=r["address"],
+                is_active=True
+            )
+            db.add(emp)
+        db.commit()
+        return {"status": "success", "message": f"Imported {len(rows)} employees"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+# --- CUSTOMER BULK UPLOAD ---
+
+CUSTOMER_TEMPLATE_COLUMNS = ["name", "phone", "email", "vehicle_number"]
+
+@router.get("/customers/template")
+def download_customer_template():
+    return {"columns": CUSTOMER_TEMPLATE_COLUMNS, "sample": {"name": "ABC Logistics", "phone": "0112345678", "email": "info@abc.com", "vehicle_number": "WP ABC-1234"}}
+
+@router.post("/customers/preview")
+async def preview_customers_upload(file: UploadFile = File(...), db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    _ = current_user
+    content = await file.read()
+    _, rows = _read_xlsx_bytes(content) if file.filename.endswith(".xlsx") else _read_csv_bytes(content)
+    
+    valid_rows = []
+    errors = []
+
+    for idx, row in enumerate(rows, start=2):
+        row_errors = []
+        name = str(row.get("name") or "").strip()
+        phone = str(row.get("phone") or "").strip()
+        if not name: row_errors.append("name is required")
+        if not phone: row_errors.append("phone is required")
+        
+        # Duplicate check
+        if phone:
+            existing = db.query(models.Customer).filter(models.Customer.phone == phone).first()
+            if existing: row_errors.append(f"Customer with phone '{phone}' already exists")
+
+        if row_errors:
+            errors.append({"row": idx, "errors": row_errors})
+        else:
+            valid_rows.append({"name": name, "phone": phone, "email": str(row.get("email") or "").strip() or None, "vehicle_number": str(row.get("vehicle_number") or "").strip() or None, "_row": idx})
+
+    return {"total_rows": len(rows), "valid_rows": len(valid_rows), "error_count": len(errors), "errors": errors, "preview": valid_rows}
+
+@router.post("/customers/commit")
+def commit_customers_upload(payload: Dict[str, Any], db: Session = Depends(get_db), current_user: models.User = Depends(require_admin)):
+    rows = payload.get("rows") or []
+    try:
+        for r in rows:
+            cust = models.Customer(name=r["name"], phone=r["phone"], email=r["email"], vehicle_number=r["vehicle_number"])
+            db.add(cust)
+        db.commit()
+        return {"status": "success", "message": f"Imported {len(rows)} customers"}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/sales/template")

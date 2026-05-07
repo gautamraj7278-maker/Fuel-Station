@@ -109,7 +109,8 @@ def create_employee(
         if not d:
             raise HTTPException(status_code=400, detail="Invalid designation_id")
 
-    e = models.Employee(**payload.dict())
+    # With user_id linking
+    e = models.Employee(**payload.model_dump())
     db.add(e)
     try:
         db.commit()
@@ -136,7 +137,7 @@ def update_employee(
     if not e:
         raise HTTPException(status_code=404, detail="Employee not found")
 
-    update_data = payload.dict(exclude_unset=True)
+    update_data = payload.model_dump(exclude_unset=True)
 
     if "id_no" in update_data and update_data["id_no"]:
         existing = db.query(models.Employee).filter(models.Employee.id_no == update_data["id_no"]).first()

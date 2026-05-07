@@ -1,4 +1,3 @@
-# supabase_auth.py
 import requests
 from jose import jwt, JWTError
 from typing import Optional, Dict, Any
@@ -7,8 +6,7 @@ from app.config import settings
 
 SUPABASE_JWKS_URL = f"{settings.supabase_url}/auth/v1/keys"
 
-
-# Cache JWKS keys (important for performance)
+# Cache JWKS
 _jwks_cache = None
 
 
@@ -25,45 +23,51 @@ def get_supabase_jwks():
 
 def verify_supabase_token(token: str) -> Optional[Dict[str, Any]]:
     """
-    Verifies Supabase JWT token and returns payload if valid
+    Verify Supabase JWT token
     """
 
     try:
         jwks = get_supabase_jwks()
 
-        # Decode header to get key id
+        # Read token header
         unverified_header = jwt.get_unverified_header(token)
         kid = unverified_header.get("kid")
 
         key = None
-        for k in jwks["keys"]:
-            if k["kid"] == kid:
-                key = k
+
+        for jwk in jwks["keys"]:
+            if jwk["kid"] == kid:
+                key = jwk
                 break
 
         if not key:
+            print("No matching JWKS key found")
             return None
 
         payload = jwt.decode(
             token,
             key,
-            algorithms=["RS256"],
+            algorithms=["ES256"],   # IMPORTANT FIX
             audience="authenticated",
             issuer=f"{settings.supabase_url}/auth/v1"
         )
 
         return payload
 
-    except JWTError:
+    except JWTError as e:
+        print("JWT Error:", str(e))
         return None
-    except Exception:
+
+    except Exception as e:
+        print("Verification Error:", str(e))
         return None
 
 
 def get_user_from_supabase(token: str) -> Optional[Dict[str, Any]]:
     """
-    Extract user info from Supabase token
+    Extract user details from verified token
     """
+
     payload = verify_supabase_token(token)
 
     if not payload:

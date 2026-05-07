@@ -31,15 +31,16 @@ def _resolve_sqlite_url(url: str) -> str:
     return normalized
 
 # Database URL - can be configured via environment variable
-SQLALCHEMY_DATABASE_URL = os.getenv(
-    "DATABASE_URL",
-    settings.database_url,
-)
+SQLALCHEMY_DATABASE_URL = os.getenv("DATABASE_URL")
+
+if not SQLALCHEMY_DATABASE_URL:
+    raise Exception("DATABASE_URL is not set in environment variables")
 
 SQLALCHEMY_DATABASE_URL = _resolve_sqlite_url(SQLALCHEMY_DATABASE_URL)
 
 print("ACTIVE DATABASE URL:")
 print(SQLALCHEMY_DATABASE_URL)
+
 # Create engine
 if "sqlite" in SQLALCHEMY_DATABASE_URL:
     engine = create_engine(

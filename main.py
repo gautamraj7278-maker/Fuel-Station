@@ -5,6 +5,10 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 
+from app import models
+print("Loading SQLAlchemy models...")
+print(models.Base.metadata.tables.keys())
+
 from app.database import engine, SessionLocal
 from app import models
 from app.auth import decode_access_token

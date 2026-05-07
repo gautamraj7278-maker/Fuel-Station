@@ -11,7 +11,14 @@ class Settings(BaseSettings):
     algorithm: str = "HS256"
     access_token_expire_minutes: int = 30
     
+    # Supabase Configuration
+    supabase_url: str = ""
+    supabase_service_role_key: str = ""
+    supabase_anon_key: str = ""
+    
     class Config:
         env_file = str(BASE_DIR / ".env")
+        env_file_encoding = "utf-8"
+        extra = "ignore"  # Allow extra environment variables without crashing
 
 settings = Settings()

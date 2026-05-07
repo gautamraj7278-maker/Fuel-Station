@@ -28,11 +28,11 @@ from app.routers import (
 )
 
 # ---------------- MIGRATIONS ----------------
-migrate_pumps_to_dispensers(engine)
-migrate_add_missing_columns(engine)
-migrate_drop_compartment_unique(engine)
-migrate_cashier_role_to_operator(engine)
-migrate_product_categories(engine)
+# migrate_pumps_to_dispensers(engine)
+# migrate_add_missing_columns(engine)
+# migrate_drop_compartment_unique(engine)
+# migrate_cashier_role_to_operator(engine)
+# migrate_product_categories(engine)
 
 models.Base.metadata.create_all(bind=engine)
 

@@ -9,3 +9,4 @@ bcrypt<4.1.0
 python-multipart>=0.0.6
 openpyxl>=3.1.2
 supabase
+psycopg2-binary

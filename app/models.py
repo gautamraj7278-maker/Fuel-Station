@@ -157,21 +157,26 @@ class ShiftConfig(Base):
 class User(Base):
     __tablename__ = "users"
     
-    # Supabase UUID (PRIMARY LINK)
     id = Column(String, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True, nullable=True) # Optional with Supabase
+    username = Column(String, unique=True, index=True, nullable=True)
     email = Column(String, unique=True, index=True, nullable=False)
-    hashed_password = Column(String, nullable=True) # Not used with Supabase
+    hashed_password = Column(String, nullable=True)
     full_name = Column(String, nullable=True)
-    role = Column(String, default="user") # admin / cashier / manager
+    role = Column(String, default="user")
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
     updated_at = Column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
-    
-    # Relationships
+
     sales = relationship("Sale", back_populates="user", foreign_keys="Sale.user_id")
     operated_sales = relationship("Sale", back_populates="operator", foreign_keys="Sale.operator_id")
-    employee = relationship("Employee", back_populates="user", uselist=False)
+
+    # ✅ FIXED LINE (IMPORTANT)
+    employee = relationship(
+        "Employee",
+        back_populates="user",
+        uselist=False,
+        foreign_keys="Employee.user_id"
+    )
 
 
 class Customer(Base):
@@ -211,24 +216,32 @@ class Employee(Base):
     __tablename__ = "employees"
 
     id = Column(Integer, primary_key=True, index=True)
-    
-    # Link to Supabase user
+
     user_id = Column(String, ForeignKey("users.id"), unique=True, nullable=True)
-    
+
     employee_name = Column(String, nullable=False, index=True)
     dob = Column(Date, nullable=True)
     address = Column(Text, nullable=True)
     contact_no = Column(String, nullable=True, index=True)
     id_no = Column(String, unique=True, nullable=True, index=True)
     designation_id = Column(Integer, ForeignKey("designations.id"), nullable=True, index=True)
+
     is_active = Column(Boolean, default=True)
     created_at = Column(DateTime, default=datetime.utcnow)
+
     is_deleted = Column(Boolean, default=False, index=True)
     deleted_at = Column(DateTime, nullable=True, index=True)
     deleted_by_user_id = Column(String, ForeignKey("users.id"), nullable=True, index=True)
 
     designation = relationship("Designation", back_populates="employees")
-    user = relationship("User", back_populates="employee", foreign_keys=[user_id])
+
+    # ✅ FIXED RELATIONSHIP (already correct but keep explicit)
+    user = relationship(
+        "User",
+        back_populates="employee",
+        foreign_keys=[user_id]
+    )
+
     deleted_by = relationship("User", foreign_keys=[deleted_by_user_id])
 
 class Dispenser(Base):

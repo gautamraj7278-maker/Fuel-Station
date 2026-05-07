@@ -6,11 +6,10 @@ router = APIRouter()
 @router.get("/test-supabase")
 def test_supabase():
     try:
-        response = supabase.table("pg_tables").select("*").limit(1).execute()
+        response = supabase.table("test_connection").select("*").limit(1).execute()
 
         return {
             "status": "success",
-            "message": "Supabase connected successfully",
             "data": response.data
         }
 

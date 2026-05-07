@@ -34,8 +34,6 @@ from app.routers import (
 # migrate_cashier_role_to_operator(engine)
 # migrate_product_categories(engine)
 
-models.Base.metadata.create_all(bind=engine)
-
 # ---------------- APP ----------------
 app = FastAPI(
     title="Fuel Station Management API",

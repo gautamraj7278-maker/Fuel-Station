@@ -162,7 +162,6 @@ if __name__ == "__main__":
     
     # Create all tables
     print("Creating database tables...")
-    models.Base.metadata.create_all(bind=engine)
     print("✓ Database tables ready!\n")
     
     # Initialize everything

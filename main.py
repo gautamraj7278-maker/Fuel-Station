@@ -8,6 +8,7 @@ from starlette.requests import Request
 from app.database import engine, SessionLocal
 from app import models
 from app.auth import decode_access_token
+from app.routers import supabase_test
 from app.schema_migrations import (
     migrate_pumps_to_dispensers,
     migrate_add_missing_columns,
@@ -76,6 +77,7 @@ app.include_router(reports.router, prefix="/api/reports", tags=["Reports"])
 app.include_router(daily_close.router, prefix="/api/daily-close", tags=["Daily Close"])
 app.include_router(financial.router, prefix="/api/financial", tags=["Financial Management"])
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
+app.include_router(supabase_test.router, prefix="/api", tags=["Supabase Test"])
 
 # ---------------- ROOT ENDPOINTS ----------------
 @app.get("/")

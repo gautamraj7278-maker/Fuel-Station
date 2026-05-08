@@ -5,6 +5,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.requests import Request
 from app.routers.auth import router as auth_router
+from app.routers import init_db
 
 from app import models
 print("Loading SQLAlchemy models...")
@@ -82,6 +83,7 @@ app.include_router(financial.router, prefix="/api/financial", tags=["Financial M
 app.include_router(tasks.router, prefix="/api/tasks", tags=["Tasks"])
 app.include_router(supabase_test.router, prefix="/api", tags=["Supabase Test"])
 app.include_router(auth_router)
+app.include_router(init_db.router)
 
 # ---------------- ROOT ENDPOINTS ----------------
 @app.get("/")

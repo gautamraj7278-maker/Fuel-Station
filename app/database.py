@@ -1,18 +1,23 @@
 import os
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import create_engine
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy.orm import sessionmaker
+from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
 
+
 BASE_DIR = Path(__file__).resolve().parent.parent
 
-# Normalize relative sqlite URLs so restarts always hit the same DB file.
+
+# -------------------------------------------------
+# SQLITE URL NORMALIZER
+# -------------------------------------------------
 def _resolve_sqlite_url(url: str) -> str:
     if not url.startswith("sqlite:///"):
         return url
+
     if url.startswith("sqlite:////"):
         return url
 
@@ -22,15 +27,49 @@ def _resolve_sqlite_url(url: str) -> str:
 
     path_part, sep, query = path_and_query.partition("?")
     path = Path(path_part)
+
     if not path.is_absolute():
         path = BASE_DIR / path
 
     normalized = f"sqlite:///{path.as_posix()}"
+
     if sep:
         normalized = f"{normalized}?{query}"
+
     return normalized
 
-# Database URL from settings
+
+# -------------------------------------------------
+# SAFE DATABASE URL DISPLAY
+# -------------------------------------------------
+def _mask_database_url(url: str) -> str:
+    try:
+        parsed = urlsplit(url)
+
+        if parsed.password:
+            username = parsed.username or ""
+            hostname = parsed.hostname or ""
+            port = f":{parsed.port}" if parsed.port else ""
+
+            netloc = f"{username}:****@{hostname}{port}"
+            return urlunsplit(
+                (
+                    parsed.scheme,
+                    netloc,
+                    parsed.path,
+                    parsed.query,
+                    parsed.fragment,
+                )
+            )
+
+        return url
+    except Exception:
+        return "DATABASE_URL configured"
+
+
+# -------------------------------------------------
+# DATABASE URL
+# -------------------------------------------------
 SQLALCHEMY_DATABASE_URL = settings.database_url
 
 if not SQLALCHEMY_DATABASE_URL:
@@ -39,30 +78,52 @@ if not SQLALCHEMY_DATABASE_URL:
 SQLALCHEMY_DATABASE_URL = _resolve_sqlite_url(SQLALCHEMY_DATABASE_URL)
 
 print("ACTIVE DATABASE URL:")
-print(SQLALCHEMY_DATABASE_URL)
+print(_mask_database_url(SQLALCHEMY_DATABASE_URL))
 
-# Create engine
-if "sqlite" in SQLALCHEMY_DATABASE_URL:
+
+# -------------------------------------------------
+# ENGINE
+# -------------------------------------------------
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
-        connect_args={"check_same_thread": False}
+        connect_args={"check_same_thread": False},
     )
 else:
     engine = create_engine(
         SQLALCHEMY_DATABASE_URL,
         pool_pre_ping=True,
-        pool_recycle=300
+        pool_recycle=300,
+
+        # Important for Render + Supabase pooler
+        pool_size=2,
+        max_overflow=3,
+        pool_timeout=30,
     )
 
-# Create session
-SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
-# Base class for models
+# -------------------------------------------------
+# SESSION
+# -------------------------------------------------
+SessionLocal = sessionmaker(
+    autocommit=False,
+    autoflush=False,
+    bind=engine,
+)
+
+
+# -------------------------------------------------
+# BASE MODEL
+# -------------------------------------------------
 Base = declarative_base()
 
-# Dependency to get database session
+
+# -------------------------------------------------
+# DB DEPENDENCY
+# -------------------------------------------------
 def get_db():
     db = SessionLocal()
+
     try:
         yield db
     finally:

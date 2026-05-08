@@ -6,7 +6,12 @@ from app.models import User, Employee
 
 def sync_user(db: Session, token: str):
     """
-    Sync Supabase user + ensure employee record exists
+    Sync Supabase user + ensure employee record exists.
+
+    IMPORTANT:
+    - Supabase role is usually "authenticated"
+    - Do NOT overwrite local DB role for existing users
+    - App roles like admin/manager/operator/cashier must stay in public.users.role
     """
 
     supabase_user = get_user_from_supabase(token)
@@ -16,9 +21,8 @@ def sync_user(db: Session, token: str):
 
     user_id = supabase_user.get("user_id")
     email = supabase_user.get("email")
-    role = supabase_user.get("role", "user")
 
-    if not user_id:
+    if not user_id or not email:
         return None
 
     # -----------------------------
@@ -27,16 +31,22 @@ def sync_user(db: Session, token: str):
     user = db.query(User).filter(User.id == user_id).first()
 
     if not user:
+        # First-time login: create app user
+        # Default role should be "operator" or "user"; admin can be assigned manually later.
         user = User(
             id=user_id,
             email=email,
-            role=role
+            role="operator",
+            is_active=True,
         )
         db.add(user)
+        db.flush()
     else:
-        # keep DB in sync with Supabase
+        # Keep email synced, but DO NOT overwrite role
         user.email = email
-        user.role = role
+
+        if user.is_active is None:
+            user.is_active = True
 
     # -----------------------------
     # EMPLOYEE SYNC
@@ -44,13 +54,13 @@ def sync_user(db: Session, token: str):
     employee = db.query(Employee).filter(Employee.user_id == user_id).first()
 
     if not employee:
-        # Create default employee record linked to the user
         employee = Employee(
             user_id=user_id,
             employee_name=email.split("@")[0],
-            is_active=True
+            is_active=True,
         )
         db.add(employee)
+        db.flush()
 
     db.commit()
     db.refresh(user)
@@ -58,5 +68,5 @@ def sync_user(db: Session, token: str):
 
     return {
         "user": user,
-        "employee": employee
+        "employee": employee,
     }

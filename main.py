@@ -119,16 +119,9 @@ def _get_username_from_request(request: Request):
 def _write_audit_log(**kwargs):
     db = SessionLocal()
     try:
-        username = kwargs.get("username")
-        user_id = None
-        if username:
-            user = db.query(models.User).filter(models.User.username == username).first()
-            if user:
-                user_id = user.id
-
         log = models.AuditLog(
-            user_id=user_id,
-            username=username,
+            user_id=None,
+            username=kwargs.get("username"),
             method=kwargs.get("method"),
             path=kwargs.get("path"),
             status_code=kwargs.get("status_code"),

@@ -3,6 +3,7 @@ from pathlib import Path
 from urllib.parse import urlsplit, urlunsplit
 
 from sqlalchemy import create_engine
+from sqlalchemy.pool import NullPool
 from sqlalchemy.orm import declarative_base, sessionmaker
 
 from app.config import settings
@@ -90,16 +91,30 @@ if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
         connect_args={"check_same_thread": False},
     )
 else:
-    engine = create_engine(
-        SQLALCHEMY_DATABASE_URL,
-        pool_pre_ping=True,
-        pool_recycle=300,
+    use_null_pool = os.getenv("DB_USE_NULL_POOL", "false").lower() in {"1", "true", "yes"}
 
-        # Important for Render + Supabase pooler
-        pool_size=2,
-        max_overflow=3,
-        pool_timeout=30,
-    )
+    if use_null_pool:
+        # Useful when an external pooler (for example Supabase pooler) is already in front.
+        engine = create_engine(
+            SQLALCHEMY_DATABASE_URL,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            poolclass=NullPool,
+        )
+    else:
+        pool_size = int(os.getenv("DB_POOL_SIZE", "10"))
+        max_overflow = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+        pool_timeout = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+
+        engine = create_engine(
+            SQLALCHEMY_DATABASE_URL,
+            pool_pre_ping=True,
+            pool_recycle=300,
+            pool_size=pool_size,
+            max_overflow=max_overflow,
+            pool_timeout=pool_timeout,
+            pool_use_lifo=True,
+        )
 
 
 # -------------------------------------------------

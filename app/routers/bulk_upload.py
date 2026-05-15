@@ -245,6 +245,7 @@ def _generate_transaction_id() -> str:
 
 
 SALES_TEMPLATE_COLUMNS = [
+    "transaction_id",  # optional (used for upsert/update)
     "business_date",  # optional (YYYY-MM-DD)
     "shift",  # optional (A/B/C)
     "transaction_type",  # sale/testing
@@ -987,6 +988,7 @@ def _validate_and_normalize_sale_row(
         return None, errors
 
     normalized = {
+        "transaction_id": str(row.get("transaction_id") or "").strip() or None,
         "business_date": business_date.isoformat() if business_date else None,
         "shift": shift_raw,
         "transaction_type": tx_raw,
@@ -1009,7 +1011,11 @@ def _validate_and_normalize_sale_row(
     return normalized, []
 
 
-@router.post("/sales/preview")
+def _build_sales_lookup_maps(db: Session) -> Tuple[Dict[str, int], Dict[str, int], Dict[Tuple[int, str], int], Dict[int, int]]:
+    return _get_employee_map(db), _get_dispenser_map(db), _get_nozzle_map(db), _get_meter_map(db)
+
+
+@router.post("/sales/preview-legacy")
 async def preview_sales_upload(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
@@ -1074,7 +1080,7 @@ async def preview_sales_upload(
     }
 
 
-@router.post("/sales/commit")
+@router.post("/sales/commit-legacy")
 def commit_sales_upload(
     payload: Dict[str, Any],
     db: Session = Depends(get_db),
@@ -1388,9 +1394,17 @@ async def preview_sales_upload(
 
     errors: List[schemas.BulkRowError] = []
     normalized_rows: List[Dict[str, Any]] = []
+    employee_map, dispenser_map, nozzle_map, meter_map = _build_sales_lookup_maps(db)
 
     for idx, row in enumerate(raw_rows, start=2):
-        normalized, row_errors = _validate_and_normalize_sale_row(row, row_number=idx)
+        normalized, row_errors = _validate_and_normalize_sale_row(
+            row,
+            row_number=idx,
+            employee_map=employee_map,
+            dispenser_map=dispenser_map,
+            nozzle_map=nozzle_map,
+            meter_map=meter_map,
+        )
         if row_errors:
             for msg in row_errors:
                 errors.append(schemas.BulkRowError(row=idx, message=msg))
@@ -1432,56 +1446,159 @@ def commit_sales_upload(
     db: Session = Depends(get_db),
     current_user: models.User = Depends(require_admin),
 ):
-    """Insert sales rows from raw-entry bulk upload."""
+    """Insert/update sales rows for backfill using explicit bulk modes."""
     inserted = 0
+    updated = 0
     row_errors: List[schemas.BulkRowError] = []
+    employee_map, dispenser_map, nozzle_map, meter_map = _build_sales_lookup_maps(db)
+
+    def _build_sale_preview(normalized: Dict[str, Any]) -> Dict[str, Any]:
+        sale_payload = schemas.SaleCreate(
+            dispenser_id=int(normalized["dispenser_id"]),
+            nozzle_id=normalized.get("nozzle_id"),
+            meter_id=normalized.get("meter_id"),
+            quantity=normalized.get("quantity"),
+            testing_quantity=normalized.get("testing_quantity"),
+            closing_meter_reading=normalized.get("closing_meter_reading"),
+            business_date=_to_date(normalized.get("business_date")),
+            transaction_type=models.TransactionType(normalized["transaction_type"]),
+            shift=models.ShiftCode(normalized["shift"]) if normalized.get("shift") else models.ShiftCode.A,
+            operator_employee_id=normalized.get("operator_employee_id"),
+            deposit_cash=normalized.get("deposit_cash"),
+            deposit_online=normalized.get("deposit_online"),
+            remarks=normalized.get("remarks"),
+        )
+        return sales_router.compute_sale_preview(sale_payload, db=db, current_user=current_user)
 
     for i, row in enumerate(payload.rows or [], start=1):
-        normalized, errors = _validate_and_normalize_sale_row(row, row_number=int(row.get("_row") or i))
+        normalized, errors = _validate_and_normalize_sale_row(
+            row,
+            row_number=int(row.get("_row") or i),
+            employee_map=employee_map,
+            dispenser_map=dispenser_map,
+            nozzle_map=nozzle_map,
+            meter_map=meter_map,
+        )
         if errors or normalized is None:
             for msg in errors or ["Invalid row"]:
                 row_errors.append(schemas.BulkRowError(row=int(row.get("_row") or i), message=msg))
             continue
 
+        txid = str(normalized.get("transaction_id") or "").strip() or None
+        existing = db.query(models.Sale).filter(models.Sale.transaction_id == txid).first() if txid else None
+
         try:
-            sale_payload = schemas.SaleCreate(
+            if payload.mode == schemas.SalesBulkCommitMode.UPDATE_ONLY:
+                if not txid:
+                    row_errors.append(schemas.BulkRowError(row=int(normalized.get("_row") or i), message="transaction_id is required in update_only mode"))
+                    continue
+                if existing is None:
+                    row_errors.append(schemas.BulkRowError(row=int(normalized.get("_row") or i), message=f"No sale found for transaction_id '{txid}'"))
+                    continue
+                preview = _build_sale_preview(normalized)
+                existing.dispenser_id = int(normalized["dispenser_id"])
+                existing.nozzle_id = preview.get("nozzle_id")
+                existing.meter_id = preview.get("meter_id")
+                existing.operator_employee_id = normalized.get("operator_employee_id")
+                existing.operator_id = current_user.id
+                existing.fuel_type = preview.get("fuel_type")
+                existing.product_id = preview.get("product_id")
+                existing.quantity = float(preview.get("quantity") or 0.0)
+                existing.testing_quantity = preview.get("testing_quantity")
+                existing.opening_meter_reading = preview.get("opening_meter_reading")
+                existing.closing_meter_reading = preview.get("closing_meter_reading")
+                existing.price_per_liter = float(preview.get("price_per_liter") or 0.0)
+                existing.total_amount = float(preview.get("total_amount") or 0.0)
+                existing.business_date = _to_date(preview.get("business_date"))
+                existing.deposit_cash = float(preview.get("deposit_cash") or 0.0)
+                existing.deposit_online = float(preview.get("deposit_online") or 0.0)
+                existing.total_deposit = float(preview.get("total_deposit") or 0.0)
+                existing.remarks = preview.get("remarks")
+                existing.transaction_type = models.TransactionType(preview.get("transaction_type") or normalized["transaction_type"])
+                existing.shift = models.ShiftCode(preview.get("shift") or normalized.get("shift") or "A")
+                existing.edited_at = datetime.utcnow()
+                existing.edited_by_user_id = current_user.id
+                updated += 1
+                continue
+
+            if payload.mode == schemas.SalesBulkCommitMode.INSERT_ONLY and existing is not None:
+                row_errors.append(schemas.BulkRowError(row=int(normalized.get("_row") or i), message=f"transaction_id '{txid}' already exists"))
+                continue
+
+            if payload.mode == schemas.SalesBulkCommitMode.UPSERT and existing is not None:
+                preview = _build_sale_preview(normalized)
+                existing.dispenser_id = int(normalized["dispenser_id"])
+                existing.nozzle_id = preview.get("nozzle_id")
+                existing.meter_id = preview.get("meter_id")
+                existing.operator_employee_id = normalized.get("operator_employee_id")
+                existing.operator_id = current_user.id
+                existing.fuel_type = preview.get("fuel_type")
+                existing.product_id = preview.get("product_id")
+                existing.quantity = float(preview.get("quantity") or 0.0)
+                existing.testing_quantity = preview.get("testing_quantity")
+                existing.opening_meter_reading = preview.get("opening_meter_reading")
+                existing.closing_meter_reading = preview.get("closing_meter_reading")
+                existing.price_per_liter = float(preview.get("price_per_liter") or 0.0)
+                existing.total_amount = float(preview.get("total_amount") or 0.0)
+                existing.business_date = _to_date(preview.get("business_date"))
+                existing.deposit_cash = float(preview.get("deposit_cash") or 0.0)
+                existing.deposit_online = float(preview.get("deposit_online") or 0.0)
+                existing.total_deposit = float(preview.get("total_deposit") or 0.0)
+                existing.remarks = preview.get("remarks")
+                existing.transaction_type = models.TransactionType(preview.get("transaction_type") or normalized["transaction_type"])
+                existing.shift = models.ShiftCode(preview.get("shift") or normalized.get("shift") or "A")
+                existing.edited_at = datetime.utcnow()
+                existing.edited_by_user_id = current_user.id
+                updated += 1
+                continue
+
+            preview = _build_sale_preview(normalized)
+            db_sale = models.Sale(
+                transaction_id=txid or _generate_transaction_id(),
                 dispenser_id=int(normalized["dispenser_id"]),
-                nozzle_id=normalized.get("nozzle_id"),
-                meter_id=normalized.get("meter_id"),
-                quantity=normalized.get("quantity"),
-                testing_quantity=normalized.get("testing_quantity"),
-                closing_meter_reading=normalized.get("closing_meter_reading"),
-                business_date=_to_date(normalized.get("business_date")),
-                transaction_type=models.TransactionType(normalized["transaction_type"]),
-                shift=models.ShiftCode(normalized["shift"]) if normalized.get("shift") else models.ShiftCode.A,
+                sales_batch_id=None,
+                nozzle_id=preview.get("nozzle_id"),
+                meter_id=preview.get("meter_id"),
+                user_id=current_user.id,
+                operator_id=current_user.id,
                 operator_employee_id=normalized.get("operator_employee_id"),
-                deposit_cash=normalized.get("deposit_cash"),
-                deposit_online=normalized.get("deposit_online"),
-                remarks=normalized.get("remarks"),
+                customer_id=None,
+                fuel_type=preview.get("fuel_type"),
+                product_id=preview.get("product_id"),
+                quantity=float(preview.get("quantity") or 0.0),
+                testing_quantity=preview.get("testing_quantity"),
+                opening_meter_reading=preview.get("opening_meter_reading"),
+                closing_meter_reading=preview.get("closing_meter_reading"),
+                price_per_liter=float(preview.get("price_per_liter") or 0.0),
+                total_amount=float(preview.get("total_amount") or 0.0),
+                payment_method="cash",
+                business_date=_to_date(preview.get("business_date")),
+                deposit_cash=float(preview.get("deposit_cash") or 0.0),
+                deposit_online=float(preview.get("deposit_online") or 0.0),
+                total_deposit=float(preview.get("total_deposit") or 0.0),
+                remarks=preview.get("remarks"),
+                transaction_type=models.TransactionType(preview.get("transaction_type") or normalized["transaction_type"]),
+                shift=models.ShiftCode(preview.get("shift") or normalized.get("shift") or "A"),
             )
-            sales_router.create_sale(sale_payload, db=db, current_user=current_user)
+            db.add(db_sale)
             inserted += 1
         except HTTPException as e:
             row_errors.append(schemas.BulkRowError(row=int(normalized.get("_row") or i), message=str(e.detail)))
+        except Exception as e:
+            row_errors.append(schemas.BulkRowError(row=int(normalized.get("_row") or i), message=str(e)))
 
-    if row_errors:
-        # Don’t partially commit unless caller explicitly opts in.
-        if not payload.allow_partial:
-            db.rollback()
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "message": "Validation failed",
-                    "errors": [e.model_dump() for e in row_errors[:200]],
-                },
-            )
+    if row_errors and not payload.allow_partial:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail={
+                "message": "Validation failed",
+                "errors": [e.model_dump() for e in row_errors[:200]],
+            },
+        )
 
     db.commit()
-
-    return schemas.SalesBulkCommitResponse(inserted=inserted, updated=0, failed=len(row_errors))
-
-
-# -----------------------------
+    return schemas.SalesBulkCommitResponse(inserted=inserted, updated=updated, failed=len(row_errors))
 # Customers Bulk Upload
 # -----------------------------
 
